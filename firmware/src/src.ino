@@ -59,18 +59,11 @@ ISR(WDT_vect) { Sleepy::watchdogEvent(); }                            // Attache
 EnergyMonitor ct1, ct2;
 
 #include <OneWire.h>                                                  // http://www.pjrc.com/teensy/td_libs_OneWire.html
-#include <DallasTemperature.h>                                        // http://download.milesburton.com/Arduino/MaximTemperature/DallasTemperature_LATEST.zip
+#include <DallasTemperature.h>                                        // https://github.com/milesburton/Arduino-Temperature-Control-Library
 #include <DS2438.h>                                                   // https://github.com/jbechter/arduino-onewire-DS2438
 
 
 #include <Wire.h>                                                     // Arduino I2C library
-#include <LiquidCrystal_I2C.h>                                        // https://github.com/openenergymonitor/LiquidCrystal_I2C
-
-int i2c_lcd_address[2]={0x27, 0x3f};                                  // I2C addresses to test for I2C LCD device
-int current_lcd_i2c_addr;                                                  // Used to store current I2C address as found by i2_lcd_detect()
-// LiquidCrystal_I2C lcd(0x27,16,2);                                  // Placeholder
-LiquidCrystal_I2C lcd(0,0,0);
-
 
 //----------------------------emonPi Firmware Version---------------------------------------------------------------------------------------------------------------
 // Changelog: https://github.com/openenergymonitor/emonpi/blob/master/firmware/readme.md
@@ -163,20 +156,6 @@ static word value;                                               // Used to stor
 long unsigned int start_press=0;                                 // Record time emonPi shutdown push switch is pressed
 bool quiet_mode = true;
 
-const char helpText1[] PROGMEM =                                 // Available Serial Commands
-"\n"
-"Available commands:\n"
-"  <nn> i     - set node IDs (standard node ids are 1..30)\n"
-"  <n> b      - set MHz band (4 = 433, 8 = 868, 9 = 915)\n"
-"  <nnn> g    - set network group (RFM12 only allows 212, 0 = any)\n"
-"  <n> c      - set collect mode (advanced, normally 0)\n"
-"  ...,<nn> a - send data packet to node <nn>, request ack\n"
-"  ...,<nn> s - send data packet to node <nn>, no ack\n"
-"  ...,<n> p  - Set AC Adapter Vcal 1p = UK, 2p = USA\n"
-"  v          - Show firmware version\n"
-"  <n> q      - set quiet mode (1 = don't report bad packets)\n"
-;
-
 //-------------------------------------------------------------------------------------------------------------------------------------------
 // SETUP ********************************************************************************************
 //-------------------------------------------------------------------------------------------------------------------------------------------
@@ -200,14 +179,13 @@ void setup()
   if (RF_STATUS==1) RF_Setup();
   check_for_DS18B20();                               // check for presence of DS18B20 and return number of sensors
 
-  // Detect and startup I2C LCD
-  current_lcd_i2c_addr = i2c_lcd_detect(i2c_lcd_address);
-  LiquidCrystal_I2C lcd(current_lcd_i2c_addr,16,2);                                   // LCD I2C address to 0x27, 16x2 line display
-  emonPi_LCD_Startup(current_lcd_i2c_addr);
+  // Startup I2C LCD
+  emonPi_LCD_Startup();
 
   delay(2000);
   CT_Detect();
-  serial_print_startup(current_lcd_i2c_addr);
+  serial_print_startup();
+  lcd_print_startup();
 
   attachInterrupt(emonPi_int1, onPulse, FALLING);  // Attach pulse counting interrupt on RJ45 (Dig 3 / INT 1)
   emonPi.pulseCount = 0;                                                  // Reset Pulse Count
@@ -254,7 +232,7 @@ void loop()
     digitalWrite(emonpi_GPIO_pin, LOW);
 
   if (Serial.available()){
-    handleInput(Serial.read());                                                   // If serial input is received
+    serial_handle_input(Serial.read());                                                   // If serial input is received
     double_LED_flash();
   }
 
