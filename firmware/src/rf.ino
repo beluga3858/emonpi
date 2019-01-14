@@ -1,3 +1,5 @@
+#if !defined(RF_DISABLE)
+
 void RF_Setup(){
 	//--------------------------------------------------Initalize RF and send out RF test packets--------------------------------------------------------------------------------------------  
   delay(10);
@@ -35,38 +37,39 @@ bool RF_Rx_Handle(){
 }
 
 void print_frame (int len) {
+  Serial.print(F(" "));
+  Serial.print(rf12_hdr & 0x1F);        // Extract and print node ID
+  Serial.print(F(" "));
+  for (byte i = 0; i < len; ++i) {
+    Serial.print((word)rf12_data[i]);
     Serial.print(F(" "));
-    Serial.print(rf12_hdr & 0x1F);        // Extract and print node ID
-    Serial.print(F(" "));
-    for (byte i = 0; i < len; ++i) {
-        Serial.print((word)rf12_data[i]);
-        Serial.print(F(" "));
-    }
-    #if RF69_COMPAT
-    // display RSSI value after packet data e.g (-xx)
-    Serial.print(F("("));
-    Serial.print(-(RF69::rssi>>1));
-    Serial.print(F(")"));
-    #endif
-    Serial.println();
+  }
+#if RF69_COMPAT
+  // display RSSI value after packet data e.g (-xx)
+  Serial.print(F("("));
+  Serial.print(-(RF69::rssi>>1));
+  Serial.print(F(")"));
+#endif
+  Serial.println();
 }
 
 void send_RF(){
 
-	if (cmd && rf12_canSend() ) {                                                //if command 'cmd' is waiting to be sent then let's send it
-	    digitalWrite(LEDpin, HIGH); delay(200); digitalWrite(LEDpin, LOW);
-	    Serial.print(F(" -> "));
-	    Serial.print((word) sendLen);
-	    Serial.print(F(" b\n"));
-	    byte header = cmd == 'a' ? RF12_HDR_ACK : 0;
-	    if (dest)
-	      header |= RF12_HDR_DST | dest;
-	    rf12_sendStart(header, stack, sendLen);
-	    cmd = 0;
-	    
-	}
+	if (rf_cmd && rf12_canSend() ) {                                                //if command 'cmd' is waiting to be sent then let's send it
+    digitalWrite(LEDpin, HIGH); delay(200); digitalWrite(LEDpin, LOW);
+    Serial.print(F(" -> "));
+    Serial.print((word) rf_send_len);
+    Serial.print(F(" b\n"));
+    byte header = rf_cmd == 'a' ? RF12_HDR_ACK : 0;
+    if (rf_dest)
+      header |= RF12_HDR_DST | rf_dest;
+    rf12_sendStart(header, stack, rf_send_len);
+    rf_cmd = 0;
+  }
 }
 
 static byte bandToFreq (byte band) {
   return band == 4 ? RF12_433MHZ : band == 8 ? RF12_868MHZ : band == 9 ? RF12_915MHZ : 0;
 }
+
+#endif // RF_DISABLE

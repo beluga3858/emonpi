@@ -47,21 +47,19 @@ emonhub.conf node decoder:
 
 */
 
-#define emonTxV3                                                      // Tell emonLib this is the emonPi V3 - don't read Vcc assume Vcc = 3.3V as is always the case on emonPi eliates bandgap error and need for calibration http://harizanov.com/2013/09/thoughts-on-avr-adc-accuracy/
+// #define RF_DISABLE                                                 // uncomment to disable RF module use
+#if !defined(RF_DISABLE)
 #define RF69_COMPAT 1                                                 // Set to 1 if using RFM69CW or 0 is using RFM12B
-
 #include <JeeLib.h>                                                   // https://github.com/openenergymonitor/jeelib
-#include <avr/pgmspace.h>
-#include <util/parity.h>
-ISR(WDT_vect) { Sleepy::watchdogEvent(); }                            // Attached JeeLib sleep function to Atmega328 watchdog -enables MCU to be put into sleep mode inbetween readings to reduce power consumption
+#endif // RF_DISABLE
 
+#define emonTxV3                                                      // Tell emonLib this is the emonPi V3 - don't read Vcc assume Vcc = 3.3V as is always the case on emonPi eliates bandgap error and need for calibration http://harizanov.com/2013/09/thoughts-on-avr-adc-accuracy/
 #include "EmonLib.h"                                                  // Include EmonLib energy monitoring library https://github.com/openenergymonitor/EmonLib
 EnergyMonitor ct1, ct2;
 
 #include <OneWire.h>                                                  // http://www.pjrc.com/teensy/td_libs_OneWire.html
 #include <DallasTemperature.h>                                        // https://github.com/milesburton/Arduino-Temperature-Control-Library
 #include <DS2438.h>                                                   // https://github.com/jbechter/arduino-onewire-DS2438
-
 
 #include <Wire.h>                                                     // Arduino I2C library
 
@@ -76,8 +74,6 @@ const unsigned long BAUD_RATE=    38400;
 const byte Vrms_EU=               230;                              // Vrms for apparent power readings (when no AC-AC voltage sample is present)
 const byte Vrms_USA=              120;                              // USA apparent power VRMS
 const int TIME_BETWEEN_READINGS=  5000;                             // Time between readings (ms)
-const unsigned long RF_RESET_PERIOD=        60000;                            // Time (ms) between RF resets (hack to keep RFM60CW alive)
-
 
 //http://openenergymonitor.org/emon/buildingblocks/calibration
 
@@ -96,7 +92,7 @@ const int ACAC_DETECTION_LEVEL=   3000;
 
 const byte TEMPERATURE_PRECISION=  12;                                 // 9 (93.8ms),10 (187.5ms) ,11 (375ms) or 12 (750ms) bits equal to resplution of 0.5C, 0.25C, 0.125C and 0.0625C
 const byte MaxOnewire=             6;                                  // maximum number of DS18B20 one wire sensors
-bool RF_STATUS=                 true;                                  // Turn RF on and off
+
 //-------------------------------------------------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -121,9 +117,12 @@ byte numSensors;
 //-------------------------------------------------------------------------------------------------------------------------------------------
 
 //-----------------------RFM12B / RFM69CW SETTINGS----------------------------------------------------------------------------------------------------
+#if !defined(RF_DISABLE)
 byte RF_freq=RF12_433MHZ;                                        // Frequency of RF69CW module can be RF12_433MHZ, RF12_868MHZ or RF12_915MHZ. You should use the one matching the module you have.
-byte nodeID = 5;                                                 // emonpi node ID
+const unsigned long RF_RESET_PERIOD=        60000;               // Time (ms) between RF resets (hack to keep RFM60CW alive)
 int networkGroup = 210;
+#endif  
+byte nodeID = 5;                                                 // emonpi node ID
 
 typedef struct {
 int power1;
@@ -146,15 +145,21 @@ unsigned long last_sample=0;                                     // Record milli
 byte flag;                                                       // flag to record shutdown push button press
 volatile byte pulseCount = 0;
 unsigned long now =0;
-unsigned long pulsetime=0;                                      // Record time of interrupt pulse
-unsigned long last_rf_rest=0;                                  // Record time of last RF reset
-
+unsigned long pulsetime=0;                                       // Record time of interrupt pulse
+#if !defined(RF_DISABLE)
 // RF Global Variables
-static byte stack[RF12_MAXDATA+4], top, sendLen, dest;           // RF variables
-static char cmd;
-static word value;                                               // Used to store serial input
-long unsigned int start_press=0;                                 // Record time emonPi shutdown push switch is pressed
+unsigned long last_rf_reset=0;                                    // Record time of last RF reset
+static byte rf_send_len, rf_dest;                                       // RF variables
+static char rf_cmd;
 bool quiet_mode = true;
+#define SERIAL_INPUT_STACK_SIZE (RF12_MAXDATA+4)
+#endif // RF_DISABLE
+#if !defined SERIAL_INPUT_STACK_SIZE
+#define SERIAL_INPUT_STACK_SIZE (16)
+#endif
+static word value;                                               // Used to store serial input
+static byte stack[SERIAL_INPUT_STACK_SIZE], top;                 // Serial input stack (and top position)
+long unsigned int start_press=0;                                 // Record time emonPi shutdown push switch is pressed
 
 //-------------------------------------------------------------------------------------------------------------------------------------------
 // SETUP ********************************************************************************************
@@ -176,7 +181,9 @@ void setup()
   }
 
   emonPi_startup();                                                     // emonPi startup proceadure, check for AC waveform and print out debug
-  if (RF_STATUS==1) RF_Setup();
+#if !defined(RF_DISABLE)  
+  RF_Setup();
+#endif  
   check_for_DS18B20();                               // check for presence of DS18B20 and return number of sensors
 
   // Startup I2C LCD
@@ -232,23 +239,22 @@ void loop()
     digitalWrite(emonpi_GPIO_pin, LOW);
 
   if (Serial.available()){
-    serial_handle_input(Serial.read());                                                   // If serial input is received
+    serial_handle_input(Serial.read());                                           // If serial input is received
     double_LED_flash();
   }
 
+#if !defined(RF_DISABLE)
+  // IF RF module is present and enabled then perform RF tasks
+  if (RF_Rx_Handle()==1) {                                                      // Returns true if RF packet is received
+     double_LED_flash();
+  }
 
-  if (RF_STATUS==1){                                                              // IF RF module is present and enabled then perform RF tasks
-    if (RF_Rx_Handle()==1) {                                                      // Returns true if RF packet is received
-       double_LED_flash();
-    }
+  send_RF();                                                                    // Transmitt data packets if needed
 
-    send_RF();                                                                    // Transmitt data packets if needed
-
-    if ((now - last_rf_rest) > RF_RESET_PERIOD) {
-      rf12_initialize(nodeID, RF_freq, networkGroup);                             // Periodically reset RFM69CW to keep it alive :-(
-    }
-
-   }
+  if ((now - last_rf_reset) > RF_RESET_PERIOD) {
+    rf12_initialize(nodeID, RF_freq, networkGroup);                             // Periodically reset RFM69CW to keep it alive :-(
+  }
+#endif
 
 
   if ((now - last_sample) > TIME_BETWEEN_READINGS)
